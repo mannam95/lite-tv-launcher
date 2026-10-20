@@ -30,11 +30,16 @@ To make it the home screen you still need a computer once. See [Install on the T
 
 ## Releasing
 
-Push a version tag. CI builds a signed APK and publishes a GitHub release:
+Releases are automatic. Every push to `main` makes CI work out the next version from the commit messages ([Conventional Commits](https://www.conventionalcommits.org)), build a signed APK, tag the commit and publish a GitHub release:
 
-```sh
-git tag v1.0.1 && git push origin v1.0.1
-```
+| Commit prefix | Release |
+|---|---|
+| `feat!:`, `fix!:` or `BREAKING CHANGE` | major (1.2.3 → 2.0.0) |
+| `feat:` | minor (1.2.3 → 1.3.0) |
+| `fix:`, `perf:` | patch (1.2.3 → 1.2.4) |
+| anything else (`chore:`, `docs:`, `ci:` …) | no release |
+
+The first release is `v1.0.0`. To force a bump, run the **release** workflow manually from the Actions tab.
 
 CI signs with the keystore stored in the repo secrets `LTV_KEYSTORE_BASE64`, `LTV_KEYSTORE_PASSWORD`, `LTV_KEY_ALIAS` and `LTV_KEY_PASSWORD`. Every release must use the same key, or installed copies can't update.
 

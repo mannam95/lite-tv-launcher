@@ -1,40 +1,116 @@
-name: Release APK
+# Automated release: on every push to main, compute the next version from the
+# commit messages, build a signed APK, tag the commit and publish a GitHub Release.
+#
+# How the version is chosen (Conventional Commits, since the last vX.Y.Z tag):
+#   feat!: / fix!: / "BREAKING CHANGE"  -> major   (1.2.3 -> 2.0.0)
+#   feat:                                -> minor   (1.2.3 -> 1.3.0)
+#   fix: / perf:                         -> patch   (1.2.3 -> 1.2.4)
+#   anything else (chore/docs/ci/...)    -> no release
+# With no tag yet, the first release is v1.0.0.
+#
+# Force a bump: Actions -> release -> Run workflow, pick patch / minor / major.
+#
+# Signing secrets: LTV_KEYSTORE_BASE64, LTV_KEYSTORE_PASSWORD, LTV_KEY_ALIAS, LTV_KEY_PASSWORD.
+
+name: release
 
 on:
   push:
-    tags: ["v*.*.*"]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump (auto = infer from commit messages)"
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: write # create the tag and the GitHub Release
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags, needed to compute the next version
+
+      - name: Compute next version
+        id: version
+        run: |
+          set -euo pipefail
+
+          latest="$(git tag --list 'v*.*.*' --sort=-v:refname | head -n1)"
+          bump="${{ github.event.inputs.bump || 'auto' }}"
+
+          if [ -z "$latest" ]; then
+            version="1.0.0"
+            echo "No release tag yet; first release is ${version}."
+          else
+            IFS=. read -r major minor patch <<< "${latest#v}"
+            if [ "$bump" = "auto" ]; then
+              msgs="$(git log --format='%s%n%b' "${latest}..HEAD")"
+              if   grep -qE '^(feat|fix|refactor|perf)(\([^)]+\))?!:|BREAKING CHANGE' <<< "$msgs"; then bump=major
+              elif grep -qE '^feat(\([^)]+\))?:'                                      <<< "$msgs"; then bump=minor
+              elif grep -qE '^(fix|perf)(\([^)]+\))?:'                                <<< "$msgs"; then bump=patch
+              else bump=none
+              fi
+            fi
+
+            if [ "$bump" = "none" ]; then
+              echo "No releasable commits since ${latest}; skipping."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            case "$bump" in
+              major) major=$((major + 1)); minor=0; patch=0 ;;
+              minor) minor=$((minor + 1)); patch=0 ;;
+              patch) patch=$((patch + 1)) ;;
+            esac
+            version="${major}.${minor}.${patch}"
+            echo "Releasing ${version} (${bump} bump from ${latest})"
+          fi
+
+          echo "release=true"       >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}"    >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
+        if: steps.version.outputs.release == 'true'
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
 
       - name: Build signed release APK
+        if: steps.version.outputs.release == 'true'
         env:
-          LTV_VERSION_NAME: ${{ github.ref_name }}
+          LTV_VERSION_NAME: ${{ steps.version.outputs.version }}
           LTV_KEYSTORE_BASE64: ${{ secrets.LTV_KEYSTORE_BASE64 }}
           LTV_KEYSTORE_PASSWORD: ${{ secrets.LTV_KEYSTORE_PASSWORD }}
           LTV_KEY_ALIAS: ${{ secrets.LTV_KEY_ALIAS }}
           LTV_KEY_PASSWORD: ${{ secrets.LTV_KEY_PASSWORD }}
         run: |
-          export LTV_VERSION_NAME="${LTV_VERSION_NAME#v}"
+          set -euo pipefail
           export LTV_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
           echo "$LTV_KEYSTORE_BASE64" | base64 -d > "$LTV_KEYSTORE_FILE"
           ./gradlew --no-daemon assembleRelease
           cp app/build/outputs/apk/release/app-release.apk lite-tv-launcher.apk
 
-      # Fixed asset name so .../releases/latest/download/lite-tv-launcher.apk always points at the newest build.
-      - name: Publish GitHub release
+      # Fixed asset name so .../releases/latest/download/lite-tv-launcher.apk always
+      # points at the newest build. gh creates the tag at --target itself.
+      - name: Tag commit and create GitHub Release
+        if: steps.version.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" lite-tv-launcher.apk --title "${{ github.ref_name }}" --generate-notes
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" lite-tv-launcher.apk \
+            --target "${{ github.sha }}" \
+            --title "${{ steps.version.outputs.version }}" \
+            --generate-notes
