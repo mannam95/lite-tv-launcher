@@ -2,6 +2,14 @@ plugins {
     id "com.android.application"
 }
 
+// Release signing comes from env vars (set in CI). Without them, release falls back to the debug key.
+def keystoreFile = System.getenv("LTV_KEYSTORE_FILE")
+
+// "1.2.3" -> versionCode 10203. CI passes the tag; local builds use the defaults.
+def appVersionName = System.getenv("LTV_VERSION_NAME") ?: "1.0.0"
+def appVersionCode = appVersionName.tokenize(".").collect { it as int }
+        .with { it[0] * 10000 + it[1] * 100 + it[2] }
+
 android {
     namespace "com.litetv.launcher"
     compileSdk 35
@@ -10,8 +18,19 @@ android {
         applicationId "com.litetv.launcher"
         minSdk 28
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode appVersionCode
+        versionName appVersionName
+    }
+
+    signingConfigs {
+        if (keystoreFile) {
+            release {
+                storeFile file(keystoreFile)
+                storePassword System.getenv("LTV_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("LTV_KEY_ALIAS")
+                keyPassword System.getenv("LTV_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -19,8 +38,7 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt")
-            // Personal sideloaded app: sign release with the local debug key.
-            signingConfig signingConfigs.debug
+            signingConfig keystoreFile ? signingConfigs.release : signingConfigs.debug
         }
     }
 

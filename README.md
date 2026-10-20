@@ -14,6 +14,30 @@ Built for a TCL 32V4C (MediaTek MT5867, 1 GB RAM, Android 14 / Google TV). On th
 
 The first-run order and hidden set are in `DEFAULT_ORDER` and `DEFAULT_HIDDEN` in `HomeActivity.java`.
 
+## Download
+
+Every release has a ready-to-install APK. This link always points to the newest one:
+
+https://github.com/mannam95/lite-tv-launcher/releases/latest/download/lite-tv-launcher.apk
+
+To install it without a computer:
+
+1. On the TV, install **Downloader** (by AFTVnews) from the Play Store.
+2. Open it and enter the link above. When asked, allow Downloader to install unknown apps.
+3. Install the APK. Lite TV now appears in your app list.
+
+To make it the home screen you still need a computer once. See [Install on the TV](#install-on-the-tv-over-wi-fi).
+
+## Releasing
+
+Push a version tag. CI builds a signed APK and publishes a GitHub release:
+
+```sh
+git tag v1.0.1 && git push origin v1.0.1
+```
+
+CI signs with the keystore stored in the repo secrets `LTV_KEYSTORE_BASE64`, `LTV_KEYSTORE_PASSWORD`, `LTV_KEY_ALIAS` and `LTV_KEY_PASSWORD`. Every release must use the same key, or installed copies can't update.
+
 ## Build
 
 You need JDK 17 and the Android SDK (platform 35).
@@ -23,7 +47,7 @@ echo "sdk.dir=$HOME/Android/Sdk" > local.properties
 ./gradlew assembleRelease
 ```
 
-The release APK is signed with the local debug key, since it is meant for sideloading.
+Without the `LTV_*` signing env vars, local release builds are signed with the debug key. They can't update a copy installed from a GitHub release, so uninstall that copy first.
 
 ## Install on the TV (over Wi-Fi)
 
